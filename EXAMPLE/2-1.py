@@ -71,6 +71,7 @@ print(housing["ocean_proximity"].value_counts())
 print("housing.describe() >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> ")
 print(housing.describe())
 
+### Visualizing Geographical Data
 import matplotlib.pyplot as plt
 housing.hist(bins=50, figsize=(20,15))
 save_fig("attribute_histogram_plots")
@@ -97,6 +98,7 @@ import hashlib
 def test_set_check(identifier, test_ratio, hash=hashlib.md5):
     return bytearray(hash(np.int64(identifier)).digest())[-1] < 256 * test_ratio
 
+# 使用某种方法计算数据项的id，使得每次产生训练集和测试集内容是固定的
 def split_train_test_by_id(data, test_ratio, id_column):
     ids = data[id_column]
     in_test_set = ids.apply(lambda id_: test_set_check(id_, test_ratio))
@@ -138,3 +140,65 @@ for train_index, test_index in split.split(housing, housing["income_cat"]):
 print(strat_test_set["income_cat"].value_counts() / len(strat_test_set))
 
 print(housing["income_cat"].value_counts() / len(housing))
+
+for set_ in (strat_train_set, strat_test_set):
+    set_.drop("income_cat", axis=1, inplace=True)
+
+housing = strat_train_set.copy()
+
+housing.plot(kind="scatter", x="longitude", y="latitude")
+save_fig("bad_visualization_plot")
+plt.clf()
+
+housing.plot(kind="scatter", x="longitude", y="latitude", alpha=0.1)
+save_fig("better_visualization_plot")
+plt.clf()
+
+housing.plot(kind="scatter", x="longitude", y="latitude", alpha=0.4,
+    s=housing["population"]/100, label="population", figsize=(10,7),
+    c="median_house_value", cmap=plt.get_cmap("jet"), colorbar=True,
+    sharex=False)
+# plt.legend()
+save_fig("housing_prices_scatterplot")
+plt.clf()
+
+
+### Looking for Correlations
+print("corr_matrix = housing.corr()")
+corr_matrix = housing.corr()
+print(corr_matrix)
+
+print("corr_matrix[\"median_house_value\"].sort_values(ascending=False)")
+print(corr_matrix["median_house_value"].sort_values(ascending=False))
+
+
+
+from pandas.plotting import scatter_matrix
+attributes = ["median_house_value", "median_income", "total_rooms",
+"housing_median_age"]
+print("scatter_matrix(housing[attributes], figsize=(12, 8))")
+scatter_matrix(housing[attributes], figsize=(12, 8))
+save_fig("scatter_matrix_4_attributes")
+plt.clf()
+
+housing.plot(kind="scatter", x="median_income", y="median_house_value",
+alpha=0.1)
+save_fig("scatter_median_income_median_house_value")
+plt.clf()
+
+
+
+### Experimenting with Attribute Combinations
+housing["rooms_per_household"] = housing["total_rooms"]/housing["households"]
+housing["bedrooms_per_room"] = housing["total_bedrooms"]/housing["total_rooms"]
+housing["population_per_household"]=housing["population"]/housing["households"]
+
+corr_matrix = housing.corr()
+print("corr_matrix[\"median_house_value\"].sort_values(ascending=False)")
+print(corr_matrix["median_house_value"].sort_values(ascending=False))
+
+## Prepare the Data for Machine Learning Algorithms
+housing = strat_train_set.drop("median_house_value", axis=1) # drop labels for training set
+housing_labels = strat_train_set["median_house_value"].copy()
+
+
