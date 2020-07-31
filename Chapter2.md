@@ -231,9 +231,12 @@ The result is a plain NumPy array containing the transformed features. If you wa
 ```python
 housing_tr = pd.DataFrame(X, columns=housing_num.columns, index=housing_num.index)
 ```
+
+#### Scikit-Learn Design
 >
     <center>Scikit-Learn Design</center>
-    Scikit-Learn’s API is remarkably well designed. These are the main design principles:17
+    Scikit-Learn’s API is remarkably well designed. These are the main design principles:
+
     Consistency
         All objects share a consistent and simple interface:
 
