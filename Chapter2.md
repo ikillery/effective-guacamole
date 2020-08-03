@@ -287,4 +287,81 @@ housing_tr = pd.DataFrame(X, columns=housing_num.columns, index=housing_num.inde
         easy to quickly create a baseline working system
 
 ### Handling Text and Categorical Attributes
-        
+
+* “ocean_proximity”特征并不是随机的字符串，而是一个有限的集合，可以转换成机器擅长处理的数字型特征
+```python
+housing_cat = housing[["ocean_proximity"]]
+housing_cat.head(10)
+
+#     ocean_proximity
+# 17606       <1H OCEAN
+# 18632       <1H OCEAN
+# 14650       NEAR OCEAN
+# 3230        INLAND
+# 3555        <1H OCEAN
+# 19480       INLAND
+# 8879        <1H OCEAN
+# 13685       INLAND
+# 4937        <1H OCEAN
+# 4861         <1H OCEAN
+```
+
+
+```python
+from sklearn.preprocessing import OrdinalEncoder
+
+ordinal_encoder = OrdinalEncoder()
+housing_cat_encoded = ordinal_encoder.fit_transform(housing_cat)
+housing_cat_encoded[:10]
+```
+
+```python
+>>> from sklearn.preprocessing import OrdinalEncoder
+>>> ordinal_encoder = OrdinalEncoder()
+>>> housing_cat_encoded = ordinal_encoder.fit_transform(housing_cat)
+>>> housing_cat_encoded[:10]
+array([[0.],
+[0.],
+[4.],
+[1.],
+[0.],
+[1.],
+[0.],
+[1.],
+[0.],
+[0.]])
+
+>>> ordinal_encoder.categories_
+[array(['<1H OCEAN', 'INLAND', 'ISLAND', 'NEAR BAY', 'NEAR OCEAN'], dtype=object)]
+```
+
+这样做存在的一个问题是，机器学习算法有一个假设：两个更近的数值比更远的数值更加相似。
+显然这里不太合适。
+有一个解决方法称为"one-hot encoding"
+
+```python
+>>> from sklearn.preprocessing import OneHotEncoder
+>>> cat_encoder = OneHotEncoder()
+>>> housing_cat_1hot = cat_encoder.fit_transform(housing_cat)
+>>> housing_cat_1hot
+<16512x5 sparse matrix of type '<class 'numpy.float64'>'
+with 16512 stored elements in Compressed Sparse Row format>
+```
+* Notice that the output is a SciPy sparse matrix, instead of a NumPy array
+
+```python
+>>> housing_cat_1hot.toarray()
+array([[1., 0., 0., 0., 0.],
+[1., 0., 0., 0., 0.],
+[0., 0., 0., 0., 1.],
+...,
+[0., 1., 0., 0., 0.],
+[1., 0., 0., 0., 0.],
+[0., 0., 0., 1., 0.]])
+
+>>> cat_encoder.categories_
+[array(['<1H OCEAN', 'INLAND', 'ISLAND', 'NEAR BAY', 'NEAR OCEAN'],
+dtype=object)]
+```
+
+## Custom Transformers
