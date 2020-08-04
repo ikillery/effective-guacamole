@@ -365,3 +365,285 @@ dtype=object)]
 ```
 
 ## Custom Transformers
+自定义一个transformer需要创建一个类，并实现三个方法: fit, transform, fit_transform
+fit_transform这个方法可以简单通过继承TransformerMixin来得到。
+如果将BaseEstimator作为基类,并且在构造函数中没有参数，就会得到两个额外方法get_params()/set_params()，用于超参数自动调优。
+
+```python
+from sklearn.base import BaseEstimator, TransformerMixin
+
+rooms_ix, bedrooms_ix, population_ix, households_ix = 3, 4, 5, 6
+
+class CombinedAttributesAdder(BaseEstimator, TransformerMixin):
+    def __init__(self, add_bedrooms_per_room = True): # no *args or **kargs
+        self.add_bedrooms_per_room = add_bedrooms_per_room
+    def fit(self, X, y=None):
+        return self # nothing else to do
+    def transform(self, X):
+        rooms_per_household = X[:, rooms_ix] / X[:, households_ix]
+        population_per_household = X[:, population_ix] / X[:, households_ix]
+        if self.add_bedrooms_per_room:
+            bedrooms_per_room = X[:, bedrooms_ix] / X[:, rooms_ix]
+            return np.c_[X, rooms_per_household, population_per_household, bedrooms_per_room]
+        else:
+            return np.c_[X, rooms_per_household, population_per_household]
+
+attr_adder = CombinedAttributesAdder(add_bedrooms_per_room=False)
+housing_extra_attribs = attr_adder.transform(housing.values)
+```
+
+### Feature Scaling
+机器学习算法在输入数值属性范围差异较大时，表现得不太好。
+有两个通用方法解决：min-max scaling and standardization.
+
+* Min-max scaling (many people call this normalization)
+
+转换到区间[0, 1]，对每个数据进行操作：减去最小值，除以最大值与最小值的差。Scikit-Learn提供了MinMaxScaler，它有一个超参数feature_range，用于改变转换后的数值区间（如果不想使用[0,1]）
+
+* standardization
+首先减去均值（处理后的数据均值为0），然后除以标准差（处理后的数据标准差为1）。
+StandardScaler
+
+### Transformation Pipelines
+Scikit-Learn提供了Pipeline串联多个transformer
+```python
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+num_pipeline = Pipeline([
+    ('imputer', SimpleImputer(strategy="median")),
+    ('attribs_adder', CombinedAttributesAdder()),
+    ('std_scaler', StandardScaler()),
+    ])
+housing_num_tr = num_pipeline.fit_transform(housing_num)
+```
+除了最后一个之外都必须是transformer，（比如必须有fit_transform()方法）。
+当调用pipeline的fit()方法时，它将调用顺序调用每一个transformer的fit_transform()方法，将上一个transfomer的输出作为后一个transfomer的输入，直到最后一个estimator，它将调用fit()方法。
+pipeline暴露了与最后一个estimator相同的方法，这里是一个StandardScaler(是一个transformer)，所以这个pipeline有transfomer() 及 fit_transformer()方法。
+
+```python
+from sklearn.compose import ColumnTransformer
+num_attribs = list(housing_num)
+cat_attribs = ["ocean_proximity"]
+full_pipeline = ColumnTransformer([
+    ("num", num_pipeline, num_attribs),
+    ("cat", OneHotEncoder(), cat_attribs),
+    ])
+housing_prepared = full_pipeline.fit_transform(housing)
+```
+
+## Select and Train a Model
+### Training and Evaluating on the Training Set
+```python
+from sklearn.linear_model import LinearRegression
+# training
+lin_reg = LinearRegression()
+lin_reg.fit(housing_prepared, housing_labels)
+
+# predict
+>>> some_data = housing.iloc[:5]
+>>> some_labels = housing_labels.iloc[:5]
+>>> some_data_prepared = full_pipeline.transform(some_data)
+>>> print("Predictions:", lin_reg.predict(some_data_prepared))
+Predictions: [ 210644.6045 317768.8069 210956.4333 59218.9888 189747.5584]
+>>> print("Labels:", list(some_labels))
+Labels: [286600.0, 340600.0, 196900.0, 46300.0, 254500.0]
+```
+
+```python
+# calculate MSE
+>>> from sklearn.metrics import mean_squared_error
+>>> housing_predictions = lin_reg.predict(housing_prepared)
+>>> lin_mse = mean_squared_error(housing_labels, housing_predictions)
+>>> lin_rmse = np.sqrt(lin_mse)
+>>> lin_rmse
+68628.19819848922
+```
+
+
+```python
+from sklearn.tree import DecisionTreeRegressor
+tree_reg = DecisionTreeRegressor()
+tree_reg.fit(housing_prepared, housing_labels)
+# Now that the model is trained, let’s evaluate it on the training set:
+>>> housing_predictions = tree_reg.predict(housing_prepared)
+>>> tree_mse = mean_squared_error(housing_labels, housing_predictions)
+>>> tree_rmse = np.sqrt(tree_mse)
+>>> tree_rmse
+0.0
+```
+### Better Evaluation Using Cross-Validation
+交叉验证
+```python
+# 决策树模型
+from sklearn.model_selection import cross_val_score
+scores = cross_val_score(tree_reg, housing_prepared, housing_labels,
+    scoring="neg_mean_squared_error", cv=10)
+tree_rmse_scores = np.sqrt(-scores)
+
+>>> def display_scores(scores):
+... print("Scores:", scores)
+... print("Mean:", scores.mean())
+... print("Standard deviation:", scores.std())
+...
+>>> display_scores(tree_rmse_scores)
+Scores: [70194.33680785 66855.16363941 72432.58244769 70758.73896782
+71115.88230639 75585.14172901 70262.86139133 70273.6325285
+75366.87952553 71231.65726027]
+Mean: 71407.68766037929
+Standard deviation: 2439.4345041191004
+```
+```python
+# 线性回归模型
+>>> lin_scores = cross_val_score(lin_reg, housing_prepared, housing_labels,
+... scoring="neg_mean_squared_error", cv=10)
+...
+>>> lin_rmse_scores = np.sqrt(-lin_scores)
+>>> display_scores(lin_rmse_scores)
+Scores: [66782.73843989 66960.118071 70347.95244419 74739.57052552
+68031.13388938 71193.84183426 64969.63056405 68281.61137997
+71552.91566558 67665.10082067]
+Mean: 69052.46136345083
+Standard deviation: 2731.674001798348
+```
+
+```python
+# 随机森林模型
+>>> from sklearn.ensemble import RandomForestRegressor
+>>> forest_reg = RandomForestRegressor()
+>>> forest_reg.fit(housing_prepared, housing_labels)
+>>> [...]
+>>> forest_rmse
+18603.515021376355
+>>> display_scores(forest_rmse_scores)
+Scores: [49519.80364233 47461.9115823 50029.02762854 52325.28068953
+49308.39426421 53446.37892622 48634.8036574 47585.73832311
+53490.10699751 50021.5852922 ]
+Mean: 50182.303100336096
+Standard deviation: 2097.0810550985693
+```
+
+```python
+# 保存模型（超参数和模型参数）
+import joblib
+joblib.dump(my_model, "my_model.pkl")
+# and later...
+my_model_loaded = joblib.load("my_model.pkl")
+```
+
+## Fine-Tune Your Model
+### Grid Search
+
+```python
+from sklearn.model_selection import GridSearchCV
+param_grid = [
+    {'n_estimators': [3, 10, 30], 'max_features': [2, 4, 6, 8]},
+    {'bootstrap': [False], 'n_estimators': [3, 10], 'max_features': [2, 3, 4]},
+    ]
+forest_reg = RandomForestRegressor()
+grid_search = GridSearchCV(forest_reg, param_grid, cv=5,
+                                                            scoring='neg_mean_squared_error',
+                                                            return_train_score=True)
+grid_search.fit(housing_prepared, housing_labels)
+
+# 搜索出的来的最优超参数
+>>> grid_search.best_params_
+{'max_features': 8, 'n_estimators': 30}
+
+# 搜索出来的最优超参数对应的模型
+>>> grid_search.best_estimator_
+RandomForestRegressor(bootstrap=True, criterion='mse', max_depth=None,
+max_features=8, max_leaf_nodes=None, min_impurity_decrease=0.0,
+min_impurity_split=None, min_samples_leaf=1,
+min_samples_split=2, min_weight_fraction_leaf=0.0,
+n_estimators=30, n_jobs=None, oob_score=False, random_state=None,
+verbose=0, warm_start=False)
+
+>>> cvres = grid_search.cv_results_
+>>> for mean_score, params in zip(cvres["mean_test_score"], cvres["params"]):
+... print(np.sqrt(-mean_score), params)
+...
+63669.05791727153 {'max_features': 2, 'n_estimators': 3}
+55627.16171305252 {'max_features': 2, 'n_estimators': 10}
+53384.57867637289 {'max_features': 2, 'n_estimators': 30}
+60965.99185930139 {'max_features': 4, 'n_estimators': 3}
+52740.98248528835 {'max_features': 4, 'n_estimators': 10}
+50377.344409590376 {'max_features': 4, 'n_estimators': 30}
+58663.84733372485 {'max_features': 6, 'n_estimators': 3}
+52006.15355973719 {'max_features': 6, 'n_estimators': 10}
+50146.465964159885 {'max_features': 6, 'n_estimators': 30}
+57869.25504027614 {'max_features': 8, 'n_estimators': 3}
+51711.09443660957 {'max_features': 8, 'n_estimators': 10}
+49682.25345942335 {'max_features': 8, 'n_estimators': 30}
+62895.088889905004 {'bootstrap': False, 'max_features': 2, 'n_estimators': 3}
+54658.14484390074 {'bootstrap': False, 'max_features': 2, 'n_estimators': 10}
+59470.399594730654 {'bootstrap': False, 'max_features': 3, 'n_estimators': 3}
+52725.01091081235 {'bootstrap': False, 'max_features': 3, 'n_estimators': 10}
+57490.612956065226 {'bootstrap': False, 'max_features': 4, 'n_estimators': 3}
+51009.51445842374 {'bootstrap': False, 'max_features': 4, 'n_estimators': 10}
+```
+
+### Randomized Search
+```python
+RandomizedSearchCV
+```
+
+### Ensemble Methods
+
+
+### Analyze the Best Models and Their Errors
+```python
+>>> feature_importances = grid_search.best_estimator_.feature_importances_
+>>> feature_importances
+array([7.33442355e-02, 6.29090705e-02, 4.11437985e-02, 1.46726854e-02,
+    1.41064835e-02, 1.48742809e-02, 1.42575993e-02, 3.66158981e-01,
+    5.64191792e-02, 1.08792957e-01, 5.33510773e-02, 1.03114883e-02,
+    1.64780994e-01, 6.02803867e-05, 1.96041560e-03, 2.85647464e-03])
+
+
+>>> extra_attribs = ["rooms_per_hhold", "pop_per_hhold", "bedrooms_per_room"]
+>>> cat_encoder = full_pipeline.named_transformers_["cat"]
+>>> cat_one_hot_attribs = list(cat_encoder.categories_[0])
+>>> attributes = num_attribs + extra_attribs + cat_one_hot_attribs
+>>> sorted(zip(feature_importances, attributes), reverse=True)
+[(0.3661589806181342, 'median_income'),
+(0.1647809935615905, 'INLAND'),
+(0.10879295677551573, 'pop_per_hhold'),
+(0.07334423551601242, 'longitude'),
+(0.0629090704826203, 'latitude'),
+(0.05641917918195401, 'rooms_per_hhold'),
+(0.05335107734767581, 'bedrooms_per_room'),
+(0.041143798478729635, 'housing_median_age'),
+(0.014874280890402767, 'population'),
+(0.014672685420543237, 'total_rooms'),
+(0.014257599323407807, 'households'),
+(0.014106483453584102, 'total_bedrooms'),
+(0.010311488326303787, '<1H OCEAN'),
+(0.002856474637320158, 'NEAR OCEAN'),
+(0.00196041559947807, 'NEAR BAY'),
+(6.028038672736599e-05, 'ISLAND')]
+```
+
+### Evaluate Your System on the Test Set
+```python
+final_model = grid_search.best_estimator_
+X_test = strat_test_set.drop("median_house_value", axis=1)
+y_test = strat_test_set["median_house_value"].copy()
+X_test_prepared = full_pipeline.transform(X_test)
+
+final_predictions = final_model.predict(X_test_prepared)
+final_mse = mean_squared_error(y_test, final_predictions)
+final_rmse = np.sqrt(final_mse) # => evaluates to 47,730.2
+
+# 求得95%置信区间
+>>> from scipy import stats
+>>> confidence = 0.95
+>>> squared_errors = (final_predictions - y_test) ** 2
+>>> np.sqrt(stats.t.interval(confidence, len(squared_errors) - 1,
+... loc=squared_errors.mean(),
+... scale=stats.sem(squared_errors)))
+...
+array([45685.10470776, 49691.25001878])
+```
+
+
+## Launch, Monitor, and Maintain Your System
